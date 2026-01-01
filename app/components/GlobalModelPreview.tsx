@@ -31,6 +31,11 @@ export default function GlobalModelPreview() {
   const [spotLightColor, setSpotLightColor] = useState('#ffffff'); // 射灯颜色
   const [cameraLightEnabled, setCameraLightEnabled] = useState(true); // 相机光开关
   const [cameraLightIntensity, setCameraLightIntensity] = useState(1); // 相机光强度
+  const [modelInfo, setModelInfo] = useState<{
+    triangles: number;
+    faces: number;
+    vertices: number;
+  } | null>(null); // 模型信息
 
   // 初始化Three.js场景
   useEffect(() => {
@@ -166,11 +171,43 @@ export default function GlobalModelPreview() {
         }
 
         const model = gltf.scene;
+        
+        // 计算模型信息
+        let triangleCount = 0;
+        let faceCount = 0;
+        let vertexCount = 0;
+        
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
+            
+            const mesh = child as THREE.Mesh;
+            const geometry = mesh.geometry;
+            
+            if (geometry) {
+              // 计算顶点数
+              if (geometry.attributes.position) {
+                vertexCount += geometry.attributes.position.count;
+              }
+              
+              // 计算面数和三角形数
+              if (geometry.index) {
+                triangleCount += geometry.index.count / 3;
+                faceCount += geometry.index.count / 3;
+              } else if (geometry.attributes.position) {
+                triangleCount += geometry.attributes.position.count / 3;
+                faceCount += geometry.attributes.position.count / 3;
+              }
+            }
           }
+        });
+        
+        // 更新模型信息
+        setModelInfo({
+          triangles: Math.floor(triangleCount),
+          faces: Math.floor(faceCount),
+          vertices: vertexCount,
         });
 
         // 居中模型
@@ -287,6 +324,7 @@ export default function GlobalModelPreview() {
       setSpotLightColor('#ffffff');
       setCameraLightEnabled(true);
       setCameraLightIntensity(1);
+      setModelInfo(null);
     }
   }, [isOpen]);
 
@@ -354,6 +392,33 @@ export default function GlobalModelPreview() {
           />
         </svg>
       </button>
+
+      {/* 模型信息面板 - 关闭按钮下方 */}
+      {modelInfo && (
+        <div 
+          className="absolute top-20 left-6 z-10 px-6 py-4 rounded-xl text-white min-w-[180px]"
+          style={{
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            background: 'rgba(0, 0, 0, 0.7)',
+          }}
+        >
+          <div className="space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400 text-sm">拓扑</span>
+              <span className="text-white font-medium">三角面</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400 text-sm">面数</span>
+              <span className="text-white font-medium">{modelInfo.faces.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-gray-400 text-sm">顶点数</span>
+              <span className="text-white font-medium">{modelInfo.vertices.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 控制面板 - 右侧居中，高斯模糊背景 */}
       <div className="absolute right-6 top-1/2 -translate-y-1/2 z-10">
