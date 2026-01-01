@@ -1,6 +1,8 @@
 import type { Route } from "./+types/home";
 import { Link } from "react-router";
 import { useState } from "react";
+import { useModelPreviewStore } from "../store/modelPreviewStore";
+
 
 export function meta({ }: Route.MetaArgs) {
   return [
@@ -11,6 +13,9 @@ export function meta({ }: Route.MetaArgs) {
 
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'local' | 'network'>('local');
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [networkUrl, setNetworkUrl] = useState<string>('');
+  const { openPreview } = useModelPreviewStore();
 
   return (
     <div>
@@ -60,7 +65,9 @@ export default function Home() {
                     <path d="M5.5 13a3.5 3.5 0 01-.369-6.98 4 4 0 117.753-1.977A4.5 4.5 0 1113.5 13H11V9.413l1.293 1.293a1 1 0 001.414-1.414l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.413V13H5.5z"/>
                   </svg>
                   <p className="mb-2 text-sm text-gray-300">
-                    <span className="font-medium text-blue-400">选择模型文件</span>
+                    <span className="font-medium text-blue-400">
+                      {selectedFile ? selectedFile.name : '选择模型文件'}
+                    </span>
                   </p>
                   <p className="text-xs text-gray-500">支持glTF、OBJ、FBX、3DM、3DS、STL、PLY等格式</p>
                 </div>
@@ -68,12 +75,12 @@ export default function Home() {
                   id="file-upload" 
                   type="file" 
                   className="hidden" 
-                  accept=".gltf,.obj,.fbx,.3dm,.3ds,.stl,.ply"
+                  accept=".gltf,.obj,.fbx,.3dm,.3ds,.stl,.ply,.glb"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
                       console.log('选择的文件:', file.name);
-                      // 这里可以添加文件处理逻辑
+                      setSelectedFile(file);
                     }
                   }}
                 />
@@ -85,16 +92,31 @@ export default function Home() {
                 type="text"
                 placeholder="请输入模型文件URL"
                 className="w-full px-4 py-3 bg-black/20 border border-gray-600 rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 transition-colors"
+                value={networkUrl}
                 onChange={(e) => {
-                  console.log('输入的URL:', e.target.value);
-                  // 这里可以添加URL处理逻辑
+                  setNetworkUrl(e.target.value);
                 }}
               />
             </div>
           )}
 
           <div>
-            <button className="w-full bg-blue-500 hover:bg-blue-600 py-3 rounded-md text-base font-medium transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-blue-500/25">
+            <button 
+              onClick={() => {
+                if (activeTab === 'local' && selectedFile) {
+                  // 为本地文件创建临时URL
+                  const objectUrl = URL.createObjectURL(selectedFile);
+                  openPreview(objectUrl);
+                } else if (activeTab === 'network' && networkUrl) {
+                  // 直接使用网络URL
+                  openPreview(networkUrl);
+                } else {
+                  // 如果没有选择文件或输入URL，打开默认立方体
+                  openPreview();
+                }
+              }}
+              className="w-full bg-blue-500 hover:bg-blue-600 py-3 rounded-md text-base font-medium transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg hover:shadow-blue-500/25"
+            >
               预览模型
             </button>
           </div>
