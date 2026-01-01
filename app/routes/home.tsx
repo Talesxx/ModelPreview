@@ -69,13 +69,13 @@ export default function Home() {
                       {selectedFile ? selectedFile.name : '选择模型文件'}
                     </span>
                   </p>
-                  <p className="text-xs text-gray-500">支持glTF、OBJ、FBX、3DM、3DS、STL、PLY等格式</p>
+                  <p className="text-xs text-gray-500">支持GLB/glTF等格式</p>
                 </div>
                 <input 
                   id="file-upload" 
                   type="file" 
                   className="hidden" 
-                  accept=".gltf,.obj,.fbx,.3dm,.3ds,.stl,.ply,.glb"
+                  accept=".glb,.gltf"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
                     if (file) {
