@@ -225,8 +225,14 @@ export default function GlobalModelPreview() {
         const box = new THREE.Box3().setFromObject(model);
         const center = box.getCenter(new THREE.Vector3());
         model.position.sub(center);
-
         sceneRef.current!.add(model);
+        // 遍历将模型的默认材质保存到userData中
+        model.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            const mesh = child as THREE.Mesh;
+            mesh.userData.originalMaterial = mesh.material;
+          }
+        });
         modelRef.current = model;
       },
       (xhr) => {
@@ -287,10 +293,13 @@ export default function GlobalModelPreview() {
   // 切换材质模式
   useEffect(() => {
     if (!modelRef.current) return;
-
     modelRef.current.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         const mesh = child as THREE.Mesh;
+        // 恢复默认材质（如果有保存的话）
+        if (mesh.userData.originalMaterial) {
+          mesh.material = mesh.userData.originalMaterial;
+        }
         const originalMaterial = mesh.material as THREE.MeshStandardMaterial;
 
         switch (materialMode) {
