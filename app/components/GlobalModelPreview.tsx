@@ -3,11 +3,16 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { useModelPreviewStore } from '../store/modelPreviewStore';
+import { message, Progress, type ProgressProps } from 'antd';
 
 export type MaterialMode = 'default' | 'white' | 'albedo' | 'normal';
+const conicColors: ProgressProps['strokeColor'] = {
+  '0%': '#108ee9',
+  '100%': '#87d068',
+};
 
 export default function GlobalModelPreview() {
-  const { isOpen, modelUrl, closePreview } = useModelPreviewStore();
+  const { isOpen, modelUrl, closePreview, isLoading, loadingProgress, setLoadingProgress, setIsLoading } = useModelPreviewStore();
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -47,7 +52,7 @@ export default function GlobalModelPreview() {
 
     // 创建场景
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a1a);
+    scene.background = null; // 移除背景色，使用透明背景
     sceneRef.current = scene;
 
     // 创建相机
@@ -61,7 +66,8 @@ export default function GlobalModelPreview() {
     cameraRef.current = camera;
 
     // 创建渲染器
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // 启用 alpha 通道支持透明背景
+    renderer.setClearColor(0x000000, 0); // 设置清除颜色为透明
     renderer.setSize(width, height);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -115,7 +121,7 @@ export default function GlobalModelPreview() {
     const animate = () => {
       animationIdRef.current = requestAnimationFrame(animate);
       controls.update();
-      
+
       // 更新相机光位置：保持与模型固定距离
       if (cameraLightRef.current && cameraRef.current) {
         const modelCenter = new THREE.Vector3(0, 0, 0);
@@ -128,7 +134,7 @@ export default function GlobalModelPreview() {
         );
         cameraLightRef.current.position.copy(lightPos);
       }
-      
+
       renderer.render(scene, camera);
     };
     animate();
@@ -137,7 +143,7 @@ export default function GlobalModelPreview() {
     const handleResize = () => {
       const newWidth = window.innerWidth;
       const newHeight = window.innerHeight;
-      
+
       camera.aspect = newWidth / newHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(newWidth, newHeight);
@@ -165,32 +171,37 @@ export default function GlobalModelPreview() {
     loader.load(
       modelUrl,
       (gltf) => {
+        // 加载完成，设置进度为100%并关闭加载状态
+        setLoadingProgress(100);
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 300);
         // 移除旧模型
         if (modelRef.current && sceneRef.current) {
           sceneRef.current.remove(modelRef.current);
         }
 
         const model = gltf.scene;
-        
+
         // 计算模型信息
         let triangleCount = 0;
         let faceCount = 0;
         let vertexCount = 0;
-        
+
         model.traverse((child) => {
           if ((child as THREE.Mesh).isMesh) {
             child.castShadow = true;
             child.receiveShadow = true;
-            
+
             const mesh = child as THREE.Mesh;
             const geometry = mesh.geometry;
-            
+
             if (geometry) {
               // 计算顶点数
               if (geometry.attributes.position) {
                 vertexCount += geometry.attributes.position.count;
               }
-              
+
               // 计算面数和三角形数
               if (geometry.index) {
                 triangleCount += geometry.index.count / 3;
@@ -202,7 +213,7 @@ export default function GlobalModelPreview() {
             }
           }
         });
-        
+
         // 更新模型信息
         setModelInfo({
           triangles: Math.floor(triangleCount),
@@ -218,9 +229,18 @@ export default function GlobalModelPreview() {
         sceneRef.current!.add(model);
         modelRef.current = model;
       },
-      undefined,
+      (xhr) => {
+        console.log('模型加载进度:', xhr.loaded, '总大小:', xhr);
+        // 加载进度回调
+        if (xhr.lengthComputable) {
+          const percentComplete = (xhr.loaded / xhr.total) * 100;
+          setLoadingProgress(Math.round(percentComplete) > 99 ? 99 : Math.round(percentComplete));
+        }
+      },
       (error) => {
         console.error('模型加载失败:', error);
+        message.error('模型加载失败');
+        setIsLoading(false);
       }
     );
   }, [modelUrl, isOpen]);
@@ -331,17 +351,17 @@ export default function GlobalModelPreview() {
   // 处理2D控制器的鼠标移动
   const handle2DMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!lightControl2DRef.current) return;
-    
+
     const rect = lightControl2DRef.current.getBoundingClientRect();
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
     const mouseX = e.clientX - rect.left - centerX;
     const mouseY = e.clientY - rect.top - centerY;
-    
+
     // 计算距离中心的距离
     const distance = Math.sqrt(mouseX * mouseX + mouseY * mouseY);
     const maxDistance = centerX - 20; // 留出一些边距
-    
+
     // 限制在圆形范围内
     let finalX = mouseX;
     let finalY = mouseY;
@@ -350,9 +370,9 @@ export default function GlobalModelPreview() {
       finalX = Math.cos(angle) * maxDistance;
       finalY = Math.sin(angle) * maxDistance;
     }
-    
+
     setSunPosition({ x: finalX, y: finalY });
-    
+
     // 映射到3D射灯位置
     // 将 -maxDistance 到 +maxDistance 映射到 -10 到 +10
     const scale = 10 / maxDistance;
@@ -362,9 +382,39 @@ export default function GlobalModelPreview() {
   };
 
   if (!isOpen) return null;
+  console.log(loadingProgress);
 
   return (
-    <div className="fixed inset-0 z-50">
+    <div className="fixed inset-0 z-50" style={{
+      background: "linear-gradient(rgb(11, 11, 11) 5%, rgb(110, 110, 110) 140%)"
+    }}>
+      {/* 加载遮罩 */}
+      {isLoading && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-4 px-12 py-8 rounded-2xl" style={{
+            background: 'rgba(0, 0, 0, 0.4)',
+            backdropFilter: 'blur(20px)',
+            WebkitBackdropFilter: 'blur(20px)',
+            minWidth: '400px',
+          }}>
+            <img
+              src="/loading.webp"
+              alt="加载中"
+              className="w-18 h-18 object-contain"
+            />
+            <div className="text-white text-lg font-medium">加载中...</div>
+            <div className="w-full">
+              <Progress
+                percent={loadingProgress}
+                strokeColor={conicColors}
+                style={{ color: 'white' }}
+                format={(percent) => <span style={{ color: 'white' }}>{percent}%</span>}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 全屏画布容器 */}
       <div
         ref={containerRef}
@@ -395,12 +445,12 @@ export default function GlobalModelPreview() {
 
       {/* 模型信息面板 - 关闭按钮下方 */}
       {modelInfo && (
-        <div 
+        <div
           className="absolute top-20 left-6 z-10 px-6 py-4 rounded-xl text-white min-w-[180px]"
           style={{
             backdropFilter: 'blur(12px)',
             WebkitBackdropFilter: 'blur(12px)',
-            background: 'rgba(0, 0, 0, 0.7)',
+            background: 'rgba(0, 0, 0, 0.4)',
           }}
         >
           <div className="space-y-2">
@@ -422,7 +472,7 @@ export default function GlobalModelPreview() {
 
       {/* 控制面板 - 右侧居中，高斯模糊背景 */}
       <div className="absolute right-6 top-1/2 -translate-y-1/2 z-10">
-        <div 
+        <div
           className="flex flex-col gap-4 p-6 rounded-xl text-white min-w-[320px] max-h-[90vh] overflow-y-auto "
           style={{
             backdropFilter: 'blur(12px)',
@@ -432,187 +482,183 @@ export default function GlobalModelPreview() {
         >
           <h3 className="text-lg font-bold mb-2">控制面板</h3>
 
-            {/* 材质模式 */}
-            <div>
-              <label className="block text-sm font-medium mb-2">材质模式</label>
-              <div className="flex flex-col gap-2">
-                <button
-                  onClick={() => setMaterialMode('default')}
-                  className={`px-4 py-2 rounded transition-colors ${
-                    materialMode === 'default' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+          {/* 材质模式 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">材质模式</label>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => setMaterialMode('default')}
+                className={`px-4 py-2 rounded transition-colors ${materialMode === 'default' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                >
-                  默认材质
-                </button>
-                <button
-                  onClick={() => setMaterialMode('white')}
-                  className={`px-4 py-2 rounded transition-colors ${
-                    materialMode === 'white' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+              >
+                默认材质
+              </button>
+              <button
+                onClick={() => setMaterialMode('white')}
+                className={`px-4 py-2 rounded transition-colors ${materialMode === 'white' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                >
-                  白膜
-                </button>
-                <button
-                  onClick={() => setMaterialMode('albedo')}
-                  className={`px-4 py-2 rounded transition-colors ${
-                    materialMode === 'albedo' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+              >
+                白膜
+              </button>
+              <button
+                onClick={() => setMaterialMode('albedo')}
+                className={`px-4 py-2 rounded transition-colors ${materialMode === 'albedo' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                >
-                  反照率
-                </button>
-                <button
-                  onClick={() => setMaterialMode('normal')}
-                  className={`px-4 py-2 rounded transition-colors ${
-                    materialMode === 'normal' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
+              >
+                反照率
+              </button>
+              <button
+                onClick={() => setMaterialMode('normal')}
+                className={`px-4 py-2 rounded transition-colors ${materialMode === 'normal' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'
                   }`}
-                >
-                  法线
-                </button>
-              </div>
+              >
+                法线
+              </button>
             </div>
+          </div>
 
-            {/* 相机光开关 */}
-            <div>
-              <label className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={cameraLightEnabled}
-                  onChange={(e) => setCameraLightEnabled(e.target.checked)}
-                  className="w-4 h-4"
-                />
-                <span className="text-sm">相机光</span>
-              </label>
-            </div>
-
-            {/* 相机光大小 */}
-            <div className={!cameraLightEnabled ? 'opacity-50' : ''}>
-              <label className="block text-sm font-medium mb-2">
-                相机光大小: {cameraLightIntensity.toFixed(2)}
-              </label>
+          {/* 相机光开关 */}
+          <div>
+            <label className="flex items-center gap-2">
               <input
-                type="range"
-                min="0"
-                max="5"
-                step="0.1"
-                value={cameraLightIntensity}
-                onChange={(e) => setCameraLightIntensity(parseFloat(e.target.value))}
-                className="w-full"
-                disabled={!cameraLightEnabled}
+                type="checkbox"
+                checked={cameraLightEnabled}
+                onChange={(e) => setCameraLightEnabled(e.target.checked)}
+                className="w-4 h-4"
               />
-            </div>
+              <span className="text-sm">相机光</span>
+            </label>
+          </div>
 
-            {/* 环境光强度 */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                环境光强度: {ambientIntensity.toFixed(2)}
-              </label>
+          {/* 相机光大小 */}
+          <div className={!cameraLightEnabled ? 'opacity-50' : ''}>
+            <label className="block text-sm font-medium mb-2">
+              相机光大小: {cameraLightIntensity.toFixed(2)}
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="5"
+              step="0.1"
+              value={cameraLightIntensity}
+              onChange={(e) => setCameraLightIntensity(parseFloat(e.target.value))}
+              className="w-full"
+              disabled={!cameraLightEnabled}
+            />
+          </div>
+
+          {/* 环境光强度 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              环境光强度: {ambientIntensity.toFixed(2)}
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={ambientIntensity}
+              onChange={(e) => setAmbientIntensity(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          {/* 射灯强度 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              射灯强度: {spotLightIntensity.toFixed(2)}
+            </label>
+            <input
+              type="range"
+              min="0"
+              max="10"
+              step="0.1"
+              value={spotLightIntensity}
+              onChange={(e) => setSpotLightIntensity(parseFloat(e.target.value))}
+              className="w-full"
+            />
+          </div>
+
+          {/* 射灯颜色值 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">射灯颜色值</label>
+            <div className="flex gap-2 items-center">
               <input
-                type="range"
-                min="0"
-                max="2"
-                step="0.1"
-                value={ambientIntensity}
-                onChange={(e) => setAmbientIntensity(parseFloat(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            {/* 射灯强度 */}
-            <div>
-              <label className="block text-sm font-medium mb-2">
-                射灯强度: {spotLightIntensity.toFixed(2)}
-              </label>
-              <input
-                type="range"
-                min="0"
-                max="10"
-                step="0.1"
-                value={spotLightIntensity}
-                onChange={(e) => setSpotLightIntensity(parseFloat(e.target.value))}
-                className="w-full"
-              />
-            </div>
-
-            {/* 射灯颜色值 */}
-            <div>
-              <label className="block text-sm font-medium mb-2">射灯颜色值</label>
-              <div className="flex gap-2 items-center">
-                <input
-                  type="color"
-                  value={spotLightColor}
-                  onChange={(e) => setSpotLightColor(e.target.value)}
-                  className="w-14 h-10 rounded cursor-pointer border-0"
-                  style={{
-                    background: spotLightColor,
-                  }}
-                />
-                <input
-                  type="text"
-                  value={spotLightColor.toUpperCase()}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
-                      setSpotLightColor(value);
-                    }
-                  }}
-                  className="flex-1 px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:border-blue-500"
-                  placeholder="#FFFFFF"
-                  maxLength={7}
-                />
-              </div>
-            </div>
-
-            {/* 2D射灯位置控制器 */}
-            <div>
-              <label className="block text-sm font-medium mb-2">射灯角度</label>
-              <div 
-                ref={lightControl2DRef}
-                className="relative w-48 h-48 mx-auto rounded-full bg-white flex items-center justify-center cursor-move"
+                type="color"
+                value={spotLightColor}
+                onChange={(e) => setSpotLightColor(e.target.value)}
+                className="w-14 h-10 rounded cursor-pointer border-0"
                 style={{
-                  boxShadow: 'inset 0 0 20px rgba(0,0,0,0.2)'
+                  background: spotLightColor,
                 }}
-                onMouseDown={(e) => {
-                  isDragging2DRef.current = true;
-                  handle2DMouseMove(e);
-                }}
-                onMouseMove={(e) => {
-                  if (isDragging2DRef.current) {
-                    handle2DMouseMove(e);
+              />
+              <input
+                type="text"
+                value={spotLightColor.toUpperCase()}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  if (/^#[0-9A-Fa-f]{0,6}$/.test(value)) {
+                    setSpotLightColor(value);
                   }
                 }}
-                onMouseUp={() => {
-                  isDragging2DRef.current = false;
-                }}
-                onMouseLeave={() => {
-                  isDragging2DRef.current = false;
+                className="flex-1 px-3 py-2 bg-gray-700 text-white rounded border border-gray-600 focus:outline-none focus:border-blue-500"
+                placeholder="#FFFFFF"
+                maxLength={7}
+              />
+            </div>
+          </div>
+
+          {/* 2D射灯位置控制器 */}
+          <div>
+            <label className="block text-sm font-medium mb-2">射灯角度</label>
+            <div
+              ref={lightControl2DRef}
+              className="relative w-48 h-48 mx-auto rounded-full bg-white flex items-center justify-center cursor-move"
+              style={{
+                boxShadow: 'inset 0 0 20px rgba(0,0,0,0.2)'
+              }}
+              onMouseDown={(e) => {
+                isDragging2DRef.current = true;
+                handle2DMouseMove(e);
+              }}
+              onMouseMove={(e) => {
+                if (isDragging2DRef.current) {
+                  handle2DMouseMove(e);
+                }
+              }}
+              onMouseUp={() => {
+                isDragging2DRef.current = false;
+              }}
+              onMouseLeave={() => {
+                isDragging2DRef.current = false;
+              }}
+            >
+              {/* 内圆（灰色球体） */}
+              <div className="absolute w-32 h-32 rounded-full bg-gradient-to-br from-gray-300 to-gray-500 shadow-lg" />
+
+              {/* 太阳icon */}
+              <div
+                className="absolute w-10 h-10 flex items-center justify-center transition-transform pointer-events-none"
+                style={{
+                  left: `calc(50% + ${sunPosition.x}px - 20px)`,
+                  top: `calc(50% + ${sunPosition.y}px - 20px)`,
                 }}
               >
-                {/* 内圆（灰色球体） */}
-                <div className="absolute w-32 h-32 rounded-full bg-gradient-to-br from-gray-300 to-gray-500 shadow-lg" />
-                
-                {/* 太阳icon */}
-                <div
-                  className="absolute w-10 h-10 flex items-center justify-center transition-transform pointer-events-none"
+                <img
+                  src="/Sun.png"
+                  alt="太阳"
+                  className="w-10 h-10 drop-shadow-lg"
+                  draggable={false}
                   style={{
-                    left: `calc(50% + ${sunPosition.x}px - 20px)`,
-                    top: `calc(50% + ${sunPosition.y}px - 20px)`,
+                    userSelect: 'none',
                   }}
-                >
-                  <img 
-                    src="/Sun.png" 
-                    alt="太阳" 
-                    className="w-10 h-10 drop-shadow-lg"
-                    draggable={false}
-                    style={{
-                        userSelect: 'none',
-                    }}
-                  />
-                </div>
+                />
               </div>
-              <p className="text-xs text-gray-400 mt-2 text-center">
-                拖动太阳图标调节射灯角度
-              </p>
             </div>
+            <p className="text-xs text-gray-400 mt-2 text-center">
+              拖动太阳图标调节射灯角度
+            </p>
+          </div>
         </div>
       </div>
     </div>
